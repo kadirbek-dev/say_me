@@ -8,22 +8,50 @@ import 'services/security_service.dart';
 import 'services/safety_service.dart';
 
 void main() async {
+  // 1. Обязательная инициализация движка Flutter
   WidgetsFlutterBinding.ensureInitialized();
 
-  if (kIsWeb) {
-    await Firebase.initializeApp(
-      options: const FirebaseOptions(
-        apiKey: "AIzaSyAb3xvaU9119y6_9gaYe0qb7V5Cqjv_0L8",
-        authDomain: "sayme-2d93e.firebaseapp.com",
-        projectId: "sayme-2d93e",
-        storageBucket: "sayme-2d93e.firebasestorage.app",
-        messagingSenderId: "302686958026",
-        appId: "1:302686958026:web:ed73452e209a7eabc61f33",
-        measurementId: "G-BSWYNSL3DQ",
+  // 2. Ловушка ошибок: вместо чёрного экрана покажет детали ошибки
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: SingleChildScrollView(
+            child: Text(
+              'ОШИБКА ЗАПУСКА:\n\n${details.exception}\n\n${details.stack}',
+              style: const TextStyle(
+                color: Colors.red,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
       ),
     );
-  } else {
-    await Firebase.initializeApp();
+  };
+
+  // 3. Инициализация Firebase с обработкой ошибок
+  try {
+    if (kIsWeb) {
+      await Firebase.initializeApp(
+        options: const FirebaseOptions(
+          apiKey: "AIzaSyAb3xvaU9119y6_9gaYe0qb7V5Cqjv_0L8",
+          authDomain: "sayme-2d93e.firebaseapp.com",
+          projectId: "sayme-2d93e",
+          storageBucket: "sayme-2d93e.firebasestorage.app",
+          messagingSenderId: "302686958026",
+          appId: "1:302686958026:web:ed73452e209a7eabc61f33",
+          measurementId: "G-BSWYNSL3DQ",
+        ),
+      );
+    } else {
+      await Firebase.initializeApp();
+    }
+  } catch (e) {
+    debugPrint("Firebase init error: $e");
   }
 
   runApp(const SayMeApp());
