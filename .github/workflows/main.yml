@@ -25,13 +25,13 @@ jobs:
 
     - name: Find Project Dir and Build
       run: |
-        PROJECT_DIR=$(find . -maxdepth 2 -name "pubspec.yaml" -exec dirname {} \;)
+        PROJECT_DIR=$(find . -name "pubspec.yaml" -not -path "*/.*" | head -n 1 | xargs dirname)
         echo "Found project directory at: $PROJECT_DIR"
-        cd $PROJECT_DIR
+        cd "$PROJECT_DIR"
         flutter pub get
         flutter build apk --release
-        mkdir -p $GITHUB_WORKSPACE/output
-        cp build/app/outputs/flutter-apk/app-release.apk $GITHUB_WORKSPACE/output/
+        mkdir -p "$GITHUB_WORKSPACE/output"
+        cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/output/"
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
