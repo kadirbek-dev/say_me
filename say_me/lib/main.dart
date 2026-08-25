@@ -638,7 +638,7 @@ class MainNavigationScreen extends StatefulWidget {
     required this.isDarkMode,
   });
 
-  @style
+  @override
   State<MainNavigationScreen> createState() => _MainNavigationScreenState();
 }
 
