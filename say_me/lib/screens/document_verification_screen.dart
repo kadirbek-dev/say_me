@@ -69,12 +69,10 @@ class _DocumentVerificationScreenState
       final XFile photo = await _cameraController!.takePicture();
       final inputImage = InputImage.fromFilePath(photo.path);
 
-      // 1. ИИ считывает текст с фото документа
       final RecognizedText recognizedText =
           await _textRecognizer.processImage(inputImage);
       final String fullText = recognizedText.text;
 
-      // 2. Ищем 4-значный год рождения (например, 1995, 2004, 2006)
       final RegExp dateRegExp = RegExp(r'\b(19|20)\d{2}\b');
       final Iterable<RegExpMatch> matches = dateRegExp.allMatches(fullText);
 
@@ -85,7 +83,6 @@ class _DocumentVerificationScreenState
         final int? birthYear = int.tryParse(match.group(0) ?? '');
         if (birthYear != null && birthYear > 1920 && birthYear < currentYear) {
           final int calculatedAge = currentYear - birthYear;
-          // Проверяем, совпадает ли год с возрастом аккаунта и есть ли 18 лет
           if ((calculatedAge - widget.userAge).abs() <= 1 && calculatedAge >= 18) {
             ageVerified = true;
             break;
@@ -158,7 +155,7 @@ class _DocumentVerificationScreenState
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(13),
                           child: AspectRatio(
-                            aspectRatio: 1.58, // Пропорции ID-карты
+                            aspectRatio: 1.58,
                             child: CameraPreview(_cameraController!),
                           ),
                         ),

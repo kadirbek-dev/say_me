@@ -1,7 +1,7 @@
 class SafetyService {
-  // Регулярки для поиска соцсетей и мессенджеров
+  // Регулярки для поиска соцсетей и мессенджеров (с границами слов для исключений)
   static final RegExp _socialMediaRegExp = RegExp(
-    r'(t\.me|wa\.me|vk\.com|instagram\.com|tg|тг|телеграм|telegram|ватсап|whatsapp|инста|insta|номер|\+?\d{10,12}|@[a-zA-Z0-9_]+)',
+    r'(t\.me|wa\.me|vk\.com|instagram\.com|\bтг\b|\bтелеграм\b|telegram|\bватсап\b|whatsapp|\bинста\b|insta|\bномер\b|\+?\d{10,12}|@[a-zA-Z0-9_]+)',
     caseSensitive: false,
   );
 

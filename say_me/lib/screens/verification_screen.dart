@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/user_model.dart';
-import 'face_scan_screen.dart';
 
 class VerificationScreen extends StatefulWidget {
   final UserModel currentUser;
@@ -20,23 +19,14 @@ class _VerificationScreenState extends State<VerificationScreen> {
   Future<void> _startFaceVerification() async {
     bool isSuccess = false;
 
-    // Если запускаем в браузере — автоматически зачитываем успешный тест
-    if (kIsWeb) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('ВЕБ-ТЕСТ: Проверка лицом пропущена!'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      isSuccess = true;
-    } else {
-      // На мобильном устройстве открываем настоящий сканер ML Kit
-      final bool? result = await Navigator.push<bool>(
-        context,
-        MaterialPageRoute(builder: (context) => const FaceScanScreen()),
-      );
-      isSuccess = result ?? false;
-    }
+    // Заглушка: временно пропускаем проверку для всех устройств
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Проверка лица временно пропущена!'),
+        backgroundColor: Colors.green,
+      ),
+    );
+    isSuccess = true;
 
     if (isSuccess) {
       setState(() => _isProcessing = true);

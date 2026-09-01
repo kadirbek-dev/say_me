@@ -1,57 +1,57 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'screens/face_scan_screen.dart';
-import 'services/security_service.dart';
-import 'services/safety_service.dart';
 
 void main() async {
-  // 1. Обязательная инициализация движка Flutter
-  WidgetsFlutterBinding.ensureInitialized();
+  // Перехватываем все незафиксированные ошибки на этапе инициализации
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
 
-  // 2. Ловушка ошибок: отображает детали ошибки при сбое
-  ErrorWidget.builder = (FlutterErrorDetails details) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: SingleChildScrollView(
-            child: Text(
-              'ОШИБКА ЗАПУСКА:\n\n${details.exception}\n\n${details.stack}',
-              style: const TextStyle(
-                color: Colors.red,
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
+    // Кастомный экран ошибок для UI
+    ErrorWidget.builder = (FlutterErrorDetails details) {
+      return Scaffold(
+        backgroundColor: Colors.white,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: SingleChildScrollView(
+              child: Text(
+                'ОШИБКА ИНТЕРФЕЙСА:\n\n${details.exception}\n\n${details.stack}',
+                style: const TextStyle(
+                  color: Colors.red,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
         ),
-      ),
-    );
-  };
+      );
+    };
 
-  // 3. Гарантированная инициализация Firebase
-  if (kIsWeb) {
+    const firebaseOptions = FirebaseOptions(
+      apiKey: "AIzaSyAb3xvaU9119y6_9gaYe0qb7V5Cqjv_0L8",
+      authDomain: "sayme-2d93e.firebaseapp.com",
+      projectId: "sayme-2d93e",
+      storageBucket: "sayme-2d93e.firebasestorage.app",
+      messagingSenderId: "302686958026",
+      appId: "1:302686958026:web:ed73452e209a7eabc61f33",
+      measurementId: "G-BSWYNSL3DQ",
+    );
+
+    // Передаем firebaseOptions на всех платформах для предотвращения падения инициализации
     await Firebase.initializeApp(
-      options: const FirebaseOptions(
-        apiKey: "AIzaSyAb3xvaU9119y6_9gaYe0qb7V5Cqjv_0L8",
-        authDomain: "sayme-2d93e.firebaseapp.com",
-        projectId: "sayme-2d93e",
-        storageBucket: "sayme-2d93e.firebasestorage.app",
-        messagingSenderId: "302686958026",
-        appId: "1:302686958026:web:ed73452e209a7eabc61f33",
-        measurementId: "G-BSWYNSL3DQ",
-      ),
+      options: firebaseOptions,
     );
-  } else {
-    // На мобильных устройствах (Android / iOS) инициализируется дефолтным конфигом
-    await Firebase.initializeApp();
-  }
 
-  runApp(const SayMeApp());
+    runApp(const SayMeApp());
+  }, (error, stackTrace) {
+    debugPrint('КРИТИЧЕСКАЯ ОШИБКА ЗАПУСКА: $error');
+    debugPrint(stackTrace.toString());
+  });
 }
 
 // ---------------- МОДЕЛЬ ПОЛЬЗОВАТЕЛЯ ----------------
@@ -227,7 +227,6 @@ class AuthWrapper extends StatelessWidget {
               );
             }
 
-            // Если лицо не подтверждено — отправляем на экран сканирования
             if (!userModel.isIdentityVerified) {
               return VerificationScreen(currentUser: userModel);
             }
@@ -245,7 +244,7 @@ class AuthWrapper extends StatelessWidget {
   }
 }
 
-// ---------------- ЭКРАН ВЕРИФИКАЦИИ ЛИЦА ----------------
+// ---------------- ЭКРАН ВЕРИФИКАЦИИ (БЕЗ КАМЕРЫ) ----------------
 class VerificationScreen extends StatefulWidget {
   final UserModel currentUser;
 
@@ -258,23 +257,16 @@ class VerificationScreen extends StatefulWidget {
 class _VerificationScreenState extends State<VerificationScreen> {
   bool _isProcessing = false;
 
-  Future<void> _startFaceVerification() async {
-    final bool? isSuccess = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(builder: (context) => const FaceScanScreen()),
-    );
+  Future<void> _startVerification() async {
+    setState(() => _isProcessing = true);
 
-    if (isSuccess == true) {
-      setState(() => _isProcessing = true);
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(widget.currentUser.id)
+        .update({'is_identity_verified': true});
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.currentUser.id)
-          .update({'is_identity_verified': true});
-
-      if (mounted) {
-        setState(() => _isProcessing = false);
-      }
+    if (mounted) {
+      setState(() => _isProcessing = false);
     }
   }
 
@@ -296,7 +288,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  Icons.face_retouching_natural_rounded,
+                  Icons.verified_user_rounded,
                   size: 64,
                   color: theme.colorScheme.primary,
                 ),
@@ -309,13 +301,13 @@ class _VerificationScreenState extends State<VerificationScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Подтверждение личности',
+                'Подтверждение профиля',
                 style: TextStyle(fontSize: 16, color: Colors.grey),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 12),
               Text(
-                'Для безопасности пользователей публикация постов и чаты доступны только после сканирования лица.',
+                'Для безопасности пользователей доступ к чатам и публикациям открывается после быстрой проверки.',
                 style: TextStyle(
                   color: theme.textTheme.bodyMedium?.color?.withOpacity(0.6),
                   fontSize: 14,
@@ -327,11 +319,11 @@ class _VerificationScreenState extends State<VerificationScreen> {
               if (_isProcessing) ...[
                 const CircularProgressIndicator(),
                 const SizedBox(height: 16),
-                const Text('Обновляем ваш статус...'),
+                const Text('Активируем профиль...'),
               ] else ...[
                 SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton.icon(
+                  child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: theme.colorScheme.primary,
                       padding: const EdgeInsets.symmetric(vertical: 16),
@@ -339,11 +331,15 @@ class _VerificationScreenState extends State<VerificationScreen> {
                         borderRadius: BorderRadius.circular(16),
                       ),
                     ),
-                    onPressed: _startFaceVerification,
-                    icon: const Icon(Icons.camera_alt_rounded, color: Colors.white),
-                    label: const Text(
-                      'Пройти проверку лицом',
-                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    onPressed: _startVerification,
+                    child: Text(
+                      'Подтвердить',
+                      style: TextStyle(
+                        color: theme.brightness == Brightness.dark
+                            ? Colors.black
+                            : Colors.white,
+                        fontSize: 16,
+                      ),
                     ),
                   ),
                 ),
@@ -1082,7 +1078,7 @@ class ChatListScreen extends StatelessWidget {
   }
 }
 
-// ---------------- 4. ОКНО ЧАТА С E2E-ШИФРОВАНИЕМ И МОДЕРАЦИЕЙ ----------------
+// ---------------- 4. ОКНО ЧАТА ----------------
 class DirectChatScreen extends StatefulWidget {
   final UserModel currentUser;
   final UserModel targetUser;
@@ -1109,32 +1105,9 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
 
-    // 1. Проверка безопасности (попытки увести в соцсети)
-    if (SafetyService.containsSuspiciousActivity(text)) {
-      _showSafetyWarningDialog();
-      return;
-    }
-
-    // 2. ИИ-модерация на недопустимые слова
-    final moderation = SecurityService.moderateText(text);
-    if (!moderation.isSafe) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(moderation.warningMessage ?? 'Сообщение содержит недопустимый контент'),
-          backgroundColor: Colors.redAccent,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-
     _msgController.clear();
     final chatId = _getChatId();
 
-    // 3. E2E-шифрование сообщения перед отправкой
-    final encryptedText = SecurityService.encryptMessage(text, chatId);
-
-    // 4. Сохранение в Firestore
     await FirebaseFirestore.instance
         .collection('chats')
         .doc(chatId)
@@ -1142,32 +1115,9 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
         .add({
       'senderId': widget.currentUser.id,
       'recipientId': widget.targetUser.id,
-      'text': encryptedText,
+      'text': text,
       'createdAt': FieldValue.serverTimestamp(),
     });
-  }
-
-  void _showSafetyWarningDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Ограничение безопасности'),
-        content: const Text(
-          'Обнаружена попытка передачи сторонних контактов (Telegram/WhatsApp). '
-          'Для защиты пользователей требуется подтверждение возраста по документу.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Отмена'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Понятно'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -1204,11 +1154,7 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
                   itemCount: docs.length,
                   itemBuilder: (ctx, i) {
                     final data = docs[i].data() as Map<String, dynamic>;
-                    final encryptedText = data['text'] ?? '';
-
-                    // Расшифровка текста сообщения на лету
-                    final decryptedText =
-                        SecurityService.decryptMessage(encryptedText, chatId);
+                    final text = data['text'] ?? '';
                     final isMe = data['senderId'] == widget.currentUser.id;
 
                     return Align(
@@ -1224,7 +1170,7 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Text(
-                          decryptedText,
+                          text,
                           style: TextStyle(
                             color: isMe
                                 ? Colors.white

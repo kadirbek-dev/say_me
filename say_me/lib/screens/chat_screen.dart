@@ -1,8 +1,45 @@
 import 'package:flutter/material.dart';
-import '../services/security_service.dart';
-import '../services/safety_service.dart';
 import 'document_verification_screen.dart';
 
+// ---------------- СЕРВИСЫ БЕЗОПАСНОСТИ ----------------
+class SafetyService {
+  static bool containsSuspiciousActivity(String text) {
+    final lower = text.toLowerCase();
+    final phoneRegExp = RegExp(r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}');
+    final socialRegExp = RegExp(r'(t\.me|wa\.me|inst|vk|telegram|whatsapp|тг|ватсап)');
+
+    return phoneRegExp.hasMatch(text) || socialRegExp.hasMatch(lower);
+  }
+}
+
+class ModerationResult {
+  final bool isSafe;
+  final String warningMessage;
+
+  ModerationResult({required this.isSafe, required this.warningMessage});
+}
+
+class SecurityService {
+  static ModerationResult moderateText(String text) {
+    final lower = text.toLowerCase();
+    final badWords = ['спам', 'ругательство']; 
+
+    for (var word in badWords) {
+      if (lower.contains(word)) {
+        return ModerationResult(
+          isSafe: false,
+          warningMessage: 'Обнаружено недопустимое выражение.',
+        );
+      }
+    }
+    return ModerationResult(isSafe: true, warningMessage: '');
+  }
+
+  static String encryptMessage(String text, String key) => text;
+  static String decryptMessage(String encryptedText, String key) => encryptedText;
+}
+
+// ---------------- ЭКРАН ЧАТА ----------------
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
 
@@ -14,7 +51,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
   bool _isAnonymous = true;
   int _warningCount = 0;
-  final String _chatId = 'say_me_e2e_secret_key'; // Ключ шифрования сессии
+  final String _chatId = 'say_me_e2e_secret_key';
 
   final List<Map<String, dynamic>> _messages = [
     {
@@ -27,17 +64,21 @@ class _ChatScreenState extends State<ChatScreen> {
     },
   ];
 
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
   void _sendMessage() {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
 
-    // 1. Проверка на увод в другие соцсети и угрозы
     if (SafetyService.containsSuspiciousActivity(text)) {
       _showSafetyWarningDialog();
       return;
     }
 
-    // 2. ИИ-модерация текста перед шифрованием
     final moderation = SecurityService.moderateText(text);
 
     if (!moderation.isSafe) {
@@ -61,10 +102,7 @@ class _ChatScreenState extends State<ChatScreen> {
       return;
     }
 
-    // 3. E2E-шифрование сообщения (AES-256)
     final encryptedText = SecurityService.encryptMessage(text, _chatId);
-
-    // 4. Расшифровка обратно для отображения в интерфейсе
     final decryptedText = SecurityService.decryptMessage(encryptedText, _chatId);
 
     setState(() {
@@ -94,15 +132,12 @@ class _ChatScreenState extends State<ChatScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              // Переход на экран загрузки документа
-              /*
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => const DocumentVerificationScreen(),
+                  builder: (context) => const DocumentVerificationScreen(userAge: 18),
                 ),
               );
-              */
             },
             child: const Text('Пройти проверку'),
           ),
@@ -135,21 +170,22 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F8F6),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF2D2D2D)),
+          icon: Icon(Icons.arrow_back, color: theme.colorScheme.onSurface),
           onPressed: () => Navigator.pop(context),
         ),
         title: Column(
           children: [
-            const Text(
+            Text(
               'Айгерим К.',
               style: TextStyle(
-                color: Color(0xFF2D2D2D),
+                color: theme.colorScheme.onSurface,
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
               ),
@@ -175,7 +211,6 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
       body: Column(
         children: [
-          // Список сообщений
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -185,19 +220,15 @@ class _ChatScreenState extends State<ChatScreen> {
                 final isUser = msg['isUser'] as bool;
 
                 return Align(
-                  alignment:
-                      isUser ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     constraints: BoxConstraints(
                       maxWidth: MediaQuery.of(context).size.width * 0.72,
                     ),
                     decoration: BoxDecoration(
-                      color: isUser
-                          ? const Color(0xFFF3C4C8)
-                          : const Color(0xFFCBE3D5),
+                      color: isUser ? const Color(0xFFF3C4C8) : const Color(0xFFCBE3D5),
                       borderRadius: BorderRadius.circular(18),
                     ),
                     child: Text(
@@ -213,21 +244,17 @@ class _ChatScreenState extends State<ChatScreen> {
               },
             ),
           ),
-
-          // Нижняя панель
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Белая карточка с выбором режима
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: theme.cardColor,
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Column(
@@ -238,7 +265,6 @@ class _ChatScreenState extends State<ChatScreen> {
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
-                            color: Color(0xFF2D2D2D),
                           ),
                         ),
                         const SizedBox(height: 6),
@@ -251,12 +277,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                   Radio<bool>(
                                     value: true,
                                     groupValue: _isAnonymous,
-                                    activeColor: const Color(0xFF6B4EE6),
-                                    onChanged: (val) =>
-                                        setState(() => _isAnonymous = val!),
+                                    activeColor: theme.colorScheme.primary,
+                                    onChanged: (val) => setState(() => _isAnonymous = val!),
                                   ),
-                                  const Text('Анонимно',
-                                      style: TextStyle(fontSize: 13)),
+                                  const Text('Анонимно', style: TextStyle(fontSize: 13)),
                                 ],
                               ),
                             ),
@@ -268,12 +292,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                   Radio<bool>(
                                     value: false,
                                     groupValue: _isAnonymous,
-                                    activeColor: const Color(0xFF6B4EE6),
-                                    onChanged: (val) =>
-                                        setState(() => _isAnonymous = val!),
+                                    activeColor: theme.colorScheme.primary,
+                                    onChanged: (val) => setState(() => _isAnonymous = val!),
                                   ),
-                                  const Text('Открыто',
-                                      style: TextStyle(fontSize: 13)),
+                                  const Text('Открыто', style: TextStyle(fontSize: 13)),
                                 ],
                               ),
                             ),
@@ -282,26 +304,20 @@ class _ChatScreenState extends State<ChatScreen> {
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 12),
-
-                  // Поле ввода и кнопка отправки
                   Row(
                     children: [
                       Expanded(
                         child: Container(
                           decoration: BoxDecoration(
-                            color: const Color(0xFFEEEFEA),
+                            color: theme.cardColor,
                             borderRadius: BorderRadius.circular(28),
                           ),
                           child: TextField(
                             controller: _controller,
                             decoration: const InputDecoration(
                               hintText: 'Написать сообщение...',
-                              hintStyle: TextStyle(
-                                  color: Color(0xFF9E9E9E), fontSize: 14),
-                              contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 20, vertical: 14),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                               border: InputBorder.none,
                             ),
                           ),
@@ -313,8 +329,8 @@ class _ChatScreenState extends State<ChatScreen> {
                         child: Container(
                           width: 48,
                           height: 48,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF5C4643),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primary,
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(

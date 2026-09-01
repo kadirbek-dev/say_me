@@ -10,7 +10,6 @@ class ModerationResult {
 class SecurityService {
   // Базовый список стоп-слов для локальной проверки (расширяемый)
   static final List<String> _bannedKeywords = [
-    // Словарный фильтр для защиты от токсичности и мата
     'сука', 'блять', 'пидор', 'гандон', 'тварь', 'уебок', 'сучка', 'ублюдок'
   ];
 
@@ -31,15 +30,13 @@ class SecurityService {
     return ModerationResult(isSafe: true);
   }
 
-  /// 2. E2E-шифрование сообщения (AES-256)
+  /// 2. E2E-шифрование сообщения (AES-256) со случайным IV
   static String encryptMessage(String plainText, String secretKey) {
-    // Формируем 32-байтный ключ из секретного ключа чата
     final key = encrypt_lib.Key.fromUtf8(secretKey.padRight(32, '*').substring(0, 32));
-    final iv = encrypt_lib.IV.fromLength(16);
+    final iv = encrypt_lib.IV.fromSecureRandom(16); // Исправлено: теперь IV случайный и безопасный
     final encrypter = encrypt_lib.Encrypter(encrypt_lib.AES(key));
 
     final encrypted = encrypter.encrypt(plainText, iv: iv);
-    // Сохраняем IV вместе с зашифрованным текстом
     return '${iv.base64}:${encrypted.base64}';
   }
 
