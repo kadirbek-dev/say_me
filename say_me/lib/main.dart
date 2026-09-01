@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -42,7 +41,6 @@ void main() async {
       measurementId: "G-BSWYNSL3DQ",
     );
 
-    // Передаем firebaseOptions на всех платформах для предотвращения падения инициализации
     await Firebase.initializeApp(
       options: firebaseOptions,
     );
@@ -244,7 +242,7 @@ class AuthWrapper extends StatelessWidget {
   }
 }
 
-// ---------------- ЭКРАН ВЕРИФИКАЦИИ (БЕЗ КАМЕРЫ) ----------------
+// ---------------- ЭКРАН ВЕРИФИКАЦИИ ----------------
 class VerificationScreen extends StatefulWidget {
   final UserModel currentUser;
 
@@ -374,6 +372,15 @@ class _AuthScreenState extends State<AuthScreen> {
   final _passController = TextEditingController();
   final _ageController = TextEditingController(text: '18');
 
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _passController.dispose();
+    _ageController.dispose();
+    super.dispose();
+  }
+
   bool _isValidEmail(String email) {
     return RegExp(r"^[a-zA-Z0-9.a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9]+\.[a-zA-Z]+").hasMatch(email);
   }
@@ -463,6 +470,7 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   void _showError(String text) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(text),
@@ -473,6 +481,7 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 
   void _showInfo(String text) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(text),
@@ -1095,6 +1104,12 @@ class DirectChatScreen extends StatefulWidget {
 
 class _DirectChatScreenState extends State<DirectChatScreen> {
   final TextEditingController _msgController = TextEditingController();
+
+  @override
+  void dispose() {
+    _msgController.dispose();
+    super.dispose();
+  }
 
   String _getChatId() {
     final ids = [widget.currentUser.id, widget.targetUser.id]..sort();
