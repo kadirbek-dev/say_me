@@ -1,0 +1,1 @@
+{"outputDirectory": "say_me/build/web", "rewrites": [{"source": "/(.*)", "destination": "/index.html"}]}
