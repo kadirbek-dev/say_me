@@ -1,15 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 void main() async {
-  // Перехватываем все незафиксированные ошибки на этапе инициализации
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
 
-    // Кастомный экран ошибок для UI
     ErrorWidget.builder = (FlutterErrorDetails details) {
       return Scaffold(
         backgroundColor: Colors.white,
@@ -52,9 +53,117 @@ void main() async {
   });
 }
 
+// ---------------- ИИ МОДЕРАТОР И ПЕРЕВОДЧИК ----------------
+class ContentModerator {
+  static const String _geminiApiKey = 'YOUR_GEMINI_API_KEY';
+
+  static Future<bool> isTextSafe(String text) async {
+    if (_geminiApiKey == 'YOUR_GEMINI_API_KEY' || _geminiApiKey.isEmpty) {
+      return true;
+    }
+
+    final url = Uri.parse(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_geminiApiKey',
+    );
+
+    final prompt = '''
+Ты — строгое средство модерации в приложении психологической поддержки.
+Проанализируй следующий текст на предмет:
+1. Мата, нецензурной лексики, завуалированных ругательств (на любых языках).
+2. Оскорблений, угроз, хейтспича, проявления явной агрессии.
+
+Ответь СТРОГО одним словом:
+- "SAFE" — если текст допустим.
+- "UNSAFE" — если текст содержит мат или оскорбления.
+
+Текст: "$text"
+''';
+
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'parts': [
+                {'text': prompt}
+              ]
+            }
+          ],
+          'generationConfig': {
+            'temperature': 0.0,
+          }
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final resultText = data['candidates']?[0]['content']?['parts']?[0]['text']?.toString().trim() ?? '';
+        return !resultText.contains('UNSAFE');
+      }
+      return true;
+    } catch (e) {
+      return true;
+    }
+  }
+}
+
+class TranslationService {
+  static const String _geminiApiKey = 'YOUR_GEMINI_API_KEY';
+
+  static Future<String> translateText(String text, String targetLanguage) async {
+    if (_geminiApiKey == 'YOUR_GEMINI_API_KEY' || _geminiApiKey.isEmpty) {
+      return text;
+    }
+
+    final url = Uri.parse(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_geminiApiKey',
+    );
+
+    final prompt = '''
+Ты — профессиональный синхронный переводчик приложения психологической поддержки.
+Переведи следующий текст на язык: "$targetLanguage".
+Сохраняй эмпатичный tone-of-voice и смысловую точность оригинала.
+Выдавай ВЫКЛЮЧИТЕЛЬНО итоговый перевод без пояснений и кавычек.
+
+Текст: "$text"
+''';
+
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'parts': [
+                {'text': prompt}
+              ]
+            }
+          ],
+          'generationConfig': {
+            'temperature': 0.2,
+          }
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final translated = data['candidates']?[0]['content']?['parts']?[0]['text']?.toString().trim() ?? text;
+        return translated;
+      }
+      return text;
+    } catch (e) {
+      return text;
+    }
+  }
+}
+
 // ---------------- МОДЕЛЬ ПОЛЬЗОВАТЕЛЯ ----------------
 enum UserRole { patient, doctor }
 enum AgeCategory { kids, teens, adults }
+enum UserStatus { active, underReview, banned }
 
 class UserModel {
   final String id;
@@ -66,6 +175,8 @@ class UserModel {
   final AgeCategory ageCategory;
   final bool isIdentityVerified;
   final String avatarUrl;
+  final UserStatus status;
+  final int warningsCount;
 
   UserModel({
     required this.id,
@@ -77,6 +188,8 @@ class UserModel {
     required this.ageCategory,
     this.isIdentityVerified = false,
     this.avatarUrl = '',
+    this.status = UserStatus.active,
+    this.warningsCount = 0,
   });
 
   static AgeCategory calculateAgeCategory(int age) {
@@ -87,6 +200,13 @@ class UserModel {
 
   factory UserModel.fromMap(Map<String, dynamic> map, String docId) {
     final ageVal = map['age'] ?? 18;
+    
+    UserStatus parseStatus(String? statusStr) {
+      if (statusStr == 'under_review') return UserStatus.underReview;
+      if (statusStr == 'banned') return UserStatus.banned;
+      return UserStatus.active;
+    }
+
     return UserModel(
       id: docId.isNotEmpty ? docId : (map['id'] ?? ''),
       username: map['username'] ?? map['name'] ?? '',
@@ -97,10 +217,24 @@ class UserModel {
       ageCategory: calculateAgeCategory(ageVal),
       isIdentityVerified: map['is_identity_verified'] ?? false,
       avatarUrl: map['avatar_url'] ?? '',
+      status: parseStatus(map['status']),
+      warningsCount: map['warnings_count'] ?? 0,
     );
   }
 
   Map<String, dynamic> toMap() {
+    String statusToString(UserStatus st) {
+      switch (st) {
+        case UserStatus.underReview:
+          return 'under_review';
+        case UserStatus.banned:
+          return 'banned';
+        case UserStatus.active:
+        default:
+          return 'active';
+      }
+    }
+
     return {
       'id': id,
       'username': username,
@@ -110,6 +244,8 @@ class UserModel {
       'age': age,
       'is_identity_verified': isIdentityVerified,
       'avatar_url': avatarUrl,
+      'status': statusToString(status),
+      'warnings_count': warningsCount,
     };
   }
 }
@@ -166,7 +302,7 @@ class _SayMeAppState extends State<SayMeApp> {
   }
 }
 
-// ---------------- СВЯЗКА С FIREBASE AUTH И ПРОВЕРКОЙ ВЕРИФИКАЦИИ ----------------
+// ---------------- СВЯЗКА С FIREBASE AUTH И ПРОВЕРКОЙ СТАТУСА ----------------
 class AuthWrapper extends StatelessWidget {
   final VoidCallback onToggleTheme;
   final bool isDarkMode;
@@ -222,7 +358,16 @@ class AuthWrapper extends StatelessWidget {
                 age: 18,
                 ageCategory: AgeCategory.adults,
                 isIdentityVerified: false,
+                status: UserStatus.active,
               );
+            }
+
+            if (userModel.status == UserStatus.underReview) {
+              return UnderReviewScreen(userId: userModel.id);
+            }
+
+            if (userModel.status == UserStatus.banned) {
+              return const BannedScreen();
             }
 
             if (!userModel.isIdentityVerified) {
@@ -238,6 +383,164 @@ class AuthWrapper extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+// ---------------- ЭКРАН ЗАМОРОЗКИ / ПРОВЕРКИ ----------------
+class UnderReviewScreen extends StatefulWidget {
+  final String userId;
+
+  const UnderReviewScreen({super.key, required this.userId});
+
+  @override
+  State<UnderReviewScreen> createState() => _UnderReviewScreenState();
+}
+
+class _UnderReviewScreenState extends State<UnderReviewScreen> {
+  bool _isProcessing = false;
+
+  Future<void> _requestRecheck() async {
+    setState(() => _isProcessing = true);
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userId)
+          .update({'doc_submitted': true});
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Запрос отправлен модераторам. Ожидайте решения.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Ошибка отправки: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.shield_outlined,
+                  size: 64,
+                  color: Colors.orange,
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text(
+                'Аккаунт временно заморожен',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Ваш аккаунт отправлен на проверку модераторам из-за нарушений правил общения или поступивших жалоб.',
+                style: TextStyle(
+                  color: theme.textTheme.bodyMedium?.color?.withOpacity(0.7),
+                  fontSize: 14,
+                  height: 1.4,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 32),
+              if (_isProcessing)
+                const CircularProgressIndicator()
+              else ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: theme.colorScheme.primary,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    onPressed: _requestRecheck,
+                    icon: const Icon(Icons.mark_email_read_rounded, color: Colors.white),
+                    label: const Text(
+                      'Запросить повторную проверку',
+                      style: TextStyle(color: Colors.white, fontSize: 16),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextButton(
+                  onPressed: () => FirebaseAuth.instance.signOut(),
+                  child: const Text('Выйти из аккаунта'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------- ЭКРАН БАНА ----------------
+class BannedScreen extends StatelessWidget {
+  const BannedScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Icon(Icons.block, size: 80, color: Colors.redAccent),
+              const SizedBox(height: 24),
+              const Text(
+                'Аккаунт заблокирован',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Доступ к платформе ограничен за систематическое нарушение правил пользовательского соглашения.',
+                style: TextStyle(color: Colors.grey, fontSize: 14, height: 1.4),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 32),
+              TextButton(
+                onPressed: () => FirebaseAuth.instance.signOut(),
+                child: const Text('Выйти из аккаунта'),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -278,6 +581,7 @@ class _VerificationScreenState extends State<VerificationScreen> {
           padding: const EdgeInsets.all(24.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Container(
                 padding: const EdgeInsets.all(20),
@@ -424,6 +728,7 @@ class _AuthScreenState extends State<AuthScreen> {
           age: age,
           ageCategory: UserModel.calculateAgeCategory(age),
           isIdentityVerified: false,
+          status: UserStatus.active,
         );
 
         await FirebaseFirestore.instance
@@ -503,6 +808,7 @@ class _AuthScreenState extends State<AuthScreen> {
             padding: const EdgeInsets.all(24.0),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Text(
                   'Say me',
@@ -653,9 +959,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final bottomInset = MediaQuery.of(context).padding.bottom;
 
     final List<Widget> screens = [
-      const HomeScreen(),
+      HomeScreen(currentUser: widget.currentUser),
       SearchScreen(onOpenChat: (u) => _openDirectChat(context, u)),
       ChatListScreen(
         currentUser: widget.currentUser,
@@ -671,39 +978,46 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
     return Scaffold(
       body: screens[_currentIndex],
-      bottomNavigationBar: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: theme.scaffoldBackgroundColor,
-          border: Border(
-            top: BorderSide(
-              color: theme.brightness == Brightness.dark
-                  ? Colors.white10
-                  : const Color(0xFFE8E9E5),
-              width: 1,
-            ),
+      bottomNavigationBar: SafeArea(
+        bottom: true,
+        child: Container(
+          padding: EdgeInsets.only(
+            top: 10,
+            bottom: bottomInset > 0 ? 4 : 10,
           ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildNavItem(Icons.home_rounded, 0),
-            _buildNavItem(Icons.search_rounded, 1),
-            GestureDetector(
-              onTap: () => _createNewPost(context),
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF3C4C8),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.add, color: Color(0xFF5C4643), size: 22),
+          decoration: BoxDecoration(
+            color: theme.scaffoldBackgroundColor,
+            border: Border(
+              top: BorderSide(
+                color: theme.brightness == Brightness.dark
+                    ? Colors.white10
+                    : const Color(0xFFE8E9E5),
+                width: 1,
               ),
             ),
-            _buildNavItem(Icons.chat_bubble_outline_rounded, 2),
-            _buildNavItem(Icons.person_outline_rounded, 3),
-          ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _buildNavItem(Icons.home_rounded, 0),
+              _buildNavItem(Icons.search_rounded, 1),
+              GestureDetector(
+                onTap: () => _createNewPost(context),
+                child: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF3C4C8),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.add, color: Color(0xFF5C4643), size: 24),
+                ),
+              ),
+              _buildNavItem(Icons.chat_bubble_outline_rounded, 2),
+              _buildNavItem(Icons.person_outline_rounded, 3),
+            ],
+          ),
         ),
       ),
     );
@@ -714,12 +1028,16 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     final isSelected = _currentIndex == index;
     return GestureDetector(
       onTap: () => setState(() => _currentIndex = index),
-      child: Icon(
-        icon,
-        color: isSelected
-            ? theme.colorScheme.primary
-            : theme.textTheme.bodyMedium?.color?.withOpacity(0.4),
-        size: 24,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+        child: Icon(
+          icon,
+          color: isSelected
+              ? theme.colorScheme.primary
+              : theme.textTheme.bodyMedium?.color?.withOpacity(0.4),
+          size: 26,
+        ),
       ),
     );
   }
@@ -739,7 +1057,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   void _createNewPost(BuildContext context) {
     final theme = Theme.of(context);
     final textController = TextEditingController();
+    final imageUrlController = TextEditingController();
     bool isAnon = true;
+    bool isPublishing = false;
 
     showModalBottomSheet(
       context: context,
@@ -767,7 +1087,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               const SizedBox(height: 12),
               TextField(
                 controller: textController,
-                maxLines: 4,
+                maxLines: 3,
                 decoration: InputDecoration(
                   hintText: 'Поделитесь тем, что у вас на душе...',
                   filled: true,
@@ -778,8 +1098,23 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                   ),
                 ),
               ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: imageUrlController,
+                decoration: InputDecoration(
+                  hintText: 'Ссылка на изображение (опционально)...',
+                  prefixIcon: const Icon(Icons.image_outlined),
+                  filled: true,
+                  fillColor: theme.scaffoldBackgroundColor,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
               const SizedBox(height: 12),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Checkbox(
                     value: isAnon,
@@ -800,28 +1135,56 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                       borderRadius: BorderRadius.circular(16),
                     ),
                   ),
-                  onPressed: () async {
-                    final text = textController.text.trim();
-                    if (text.isNotEmpty) {
-                      await FirebaseFirestore.instance.collection('posts').add({
-                        'authorName': isAnon ? 'Аноним' : widget.currentUser.username,
-                        'authorId': widget.currentUser.id,
-                        'text': text,
-                        'isAnonymous': isAnon,
-                        'createdAt': FieldValue.serverTimestamp(),
-                      });
-                      if (context.mounted) Navigator.pop(context);
-                    }
-                  },
-                  child: Text(
-                    'Опубликовать',
-                    style: TextStyle(
-                      color: theme.brightness == Brightness.dark
-                          ? Colors.black
-                          : Colors.white,
-                      fontSize: 16,
-                    ),
-                  ),
+                  onPressed: isPublishing
+                      ? null
+                      : () async {
+                          final text = textController.text.trim();
+                          final imageUrl = imageUrlController.text.trim();
+                          if (text.isEmpty && imageUrl.isEmpty) return;
+
+                          setModalState(() => isPublishing = true);
+
+                          final isSafe = await ContentModerator.isTextSafe(text);
+
+                          if (!isSafe) {
+                            setModalState(() => isPublishing = false);
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Текст содержит недопустимые выражения или оскорбления!'),
+                                  backgroundColor: Colors.redAccent,
+                                ),
+                              );
+                            }
+                            return;
+                          }
+
+                          await FirebaseFirestore.instance.collection('posts').add({
+                            'authorName': isAnon ? 'Аноним' : widget.currentUser.username,
+                            'authorId': widget.currentUser.id,
+                            'text': text,
+                            'imageUrl': imageUrl,
+                            'isAnonymous': isAnon,
+                            'createdAt': FieldValue.serverTimestamp(),
+                          });
+
+                          if (context.mounted) Navigator.pop(context);
+                        },
+                  child: isPublishing
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        )
+                      : Text(
+                          'Опубликовать',
+                          style: TextStyle(
+                            color: theme.brightness == Brightness.dark
+                                ? Colors.black
+                                : Colors.white,
+                            fontSize: 16,
+                          ),
+                        ),
                 ),
               ),
             ],
@@ -832,9 +1195,18 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 }
 
-// ---------------- 1. ЛЕНТА ПОСТОВ ----------------
+// ---------------- 1. ЛЕНТА ПОСТОВ И КНОПКА СЛУЖБЫ 115 ----------------
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+  final UserModel currentUser;
+
+  const HomeScreen({super.key, required this.currentUser});
+
+  Future<void> _makeCall115() async {
+    final Uri url = Uri.parse('tel:115');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -844,10 +1216,12 @@ class HomeScreen extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 const Text(
                   'Say me',
@@ -859,6 +1233,46 @@ class HomeScreen extends StatelessWidget {
                   onPressed: () {},
                 ),
               ],
+            ),
+            const SizedBox(height: 10),
+            // Баннер вызова службы 115
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.redAccent.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.phone_in_talk_rounded, color: Colors.redAccent, size: 28),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Экстренная психологическая помощь',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                        Text(
+                          'Горячая линия 115 доступна круглосуточно',
+                          style: TextStyle(fontSize: 11, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.redAccent,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    onPressed: _makeCall115,
+                    child: const Text('115', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
             Expanded(
@@ -882,6 +1296,8 @@ class HomeScreen extends StatelessWidget {
                     itemCount: docs.length,
                     itemBuilder: (ctx, index) {
                       final data = docs[index].data() as Map<String, dynamic>;
+                      final imageUrl = data['imageUrl'] as String?;
+
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
                         shape: RoundedRectangleBorder(
@@ -896,8 +1312,21 @@ class HomeScreen extends StatelessWidget {
                                 style:
                                     const TextStyle(fontWeight: FontWeight.bold),
                               ),
-                              const SizedBox(height: 8),
-                              Text(data['text'] ?? ''),
+                              if ((data['text'] ?? '').toString().isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(data['text'] ?? ''),
+                              ],
+                              if (imageUrl != null && imageUrl.isNotEmpty) ...[
+                                const SizedBox(height: 12),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.network(
+                                    imageUrl,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (ctx, err, stack) => const SizedBox(),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -1037,10 +1466,13 @@ class ChatListScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return SafeArea(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 12),
-          const Text('Диалоги',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          const Center(
+            child: Text('Диалоги',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          ),
           const SizedBox(height: 12),
           Expanded(
             child: StreamBuilder<QuerySnapshot>(
@@ -1087,7 +1519,51 @@ class ChatListScreen extends StatelessWidget {
   }
 }
 
-// ---------------- 4. ОКНО ЧАТА ----------------
+// ---------------- 4. ЭЛЕМЕНТ СООБЩЕНИЯ С АНИМАЦИЕЙ ----------------
+class AnimatedMessageBubble extends StatefulWidget {
+  final Widget child;
+  final bool isMe;
+
+  const AnimatedMessageBubble({
+    super.key,
+    required this.child,
+    required this.isMe,
+  });
+
+  @override
+  State<AnimatedMessageBubble> createState() => _AnimatedMessageBubbleState();
+}
+
+class _AnimatedMessageBubbleState extends State<AnimatedMessageBubble> {
+  bool _visible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _visible = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSlide(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+      offset: _visible ? Offset.zero : const Offset(0, 0.2),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 220),
+        opacity: _visible ? 1.0 : 0.0,
+        child: Align(
+          alignment: widget.isMe ? Alignment.centerRight : Alignment.centerLeft,
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------- 5. ОКНО ЧАТА С ИИ-МОДЕРАЦИЕЙ И ПЕРЕВОДОМ ----------------
 class DirectChatScreen extends StatefulWidget {
   final UserModel currentUser;
   final UserModel targetUser;
@@ -1104,6 +1580,9 @@ class DirectChatScreen extends StatefulWidget {
 
 class _DirectChatScreenState extends State<DirectChatScreen> {
   final TextEditingController _msgController = TextEditingController();
+  bool _isSending = false;
+  String? _targetLanguage;
+  final Map<String, String> _translatedCache = {};
 
   @override
   void dispose() {
@@ -1118,7 +1597,46 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
 
   Future<void> _send() async {
     final text = _msgController.text.trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty || _isSending) return;
+
+    setState(() => _isSending = true);
+
+    final isSafe = await ContentModerator.isTextSafe(text);
+
+    if (!isSafe) {
+      final newWarnings = widget.currentUser.warningsCount + 1;
+
+      if (newWarnings >= 3) {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(widget.currentUser.id)
+            .update({
+          'warnings_count': newWarnings,
+          'status': 'under_review',
+        });
+      } else {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(widget.currentUser.id)
+            .update({'warnings_count': newWarnings});
+      }
+
+      if (mounted) {
+        setState(() => _isSending = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              newWarnings >= 3
+                  ? 'Аккаунт отправлен на проверку за частые нарушения.'
+                  : 'Сообщение заблокировано ИИ-модератором! Нарушений: $newWarnings/3',
+            ),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
 
     _msgController.clear();
     final chatId = _getChatId();
@@ -1133,6 +1651,143 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
       'text': text,
       'createdAt': FieldValue.serverTimestamp(),
     });
+
+    if (mounted) setState(() => _isSending = false);
+  }
+
+  void _showTranslationMenu(String docId, String originalText) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Выберите язык автоперевода:',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Все текущие и новые сообщения в этом чате будут автоматически переводиться на выбранный язык.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Text('🇰🇿', style: TextStyle(fontSize: 24)),
+              title: const Text('Переводить на Казахский'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _enableAutoTranslation('Казахский');
+              },
+            ),
+            ListTile(
+              leading: const Text('🇷🇺', style: TextStyle(fontSize: 24)),
+              title: const Text('Переводить на Русский'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _enableAutoTranslation('Русский');
+              },
+            ),
+            if (_targetLanguage != null)
+              ListTile(
+                leading: const Icon(Icons.clear_rounded, color: Colors.redAccent),
+                title: const Text('Отключить автоперевод', style: TextStyle(color: Colors.redAccent)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() {
+                    _targetLanguage = null;
+                    _translatedCache.clear();
+                  });
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _enableAutoTranslation(String lang) {
+    setState(() {
+      _targetLanguage = lang;
+      _translatedCache.clear();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Включён автоперевод переписки на $lang язык!'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
+  void _showReportDialog() {
+    final reasonController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Пожаловаться на ${widget.targetUser.username}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Укажите причину:',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonController,
+              maxLines: 2,
+              decoration: const InputDecoration(
+                hintText: 'Причина жалобы...',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Отмена'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () async {
+              final reason = reasonController.text.trim();
+              if (reason.isNotEmpty) {
+                await FirebaseFirestore.instance.collection('reports').add({
+                  'reporterId': widget.currentUser.id,
+                  'reportedUserId': widget.targetUser.id,
+                  'reason': reason,
+                  'createdAt': FieldValue.serverTimestamp(),
+                });
+
+                await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(widget.targetUser.id)
+                    .update({'status': 'under_review'});
+
+                if (mounted) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Жалоба отправлена.'),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Отправить', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -1142,95 +1797,157 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.targetUser.username),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.targetUser.username),
+            if (_targetLanguage != null)
+              Text(
+                'Автоперевод: $_targetLanguage',
+                style: const TextStyle(fontSize: 11, color: Colors.greenAccent),
+              ),
+          ],
+        ),
         backgroundColor: theme.scaffoldBackgroundColor,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.report_problem_outlined, color: Colors.redAccent),
+            tooltip: 'Пожаловаться',
+            onPressed: _showReportDialog,
+          ),
+        ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('chats')
-                  .doc(chatId)
-                  .collection('messages')
-                  .orderBy('createdAt', descending: true)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('chats')
+                    .doc(chatId)
+                    .collection('messages')
+                    .orderBy('createdAt', descending: true)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
-                final docs = snapshot.data?.docs ?? [];
+                  final docs = snapshot.data?.docs ?? [];
 
-                return ListView.builder(
-                  reverse: true,
-                  padding: const EdgeInsets.all(16),
-                  itemCount: docs.length,
-                  itemBuilder: (ctx, i) {
-                    final data = docs[i].data() as Map<String, dynamic>;
-                    final text = data['text'] ?? '';
-                    final isMe = data['senderId'] == widget.currentUser.id;
+                  return ListView.builder(
+                    reverse: true,
+                    padding: const EdgeInsets.all(16),
+                    itemCount: docs.length,
+                    itemBuilder: (ctx, i) {
+                      final doc = docs[i];
+                      final data = doc.data() as Map<String, dynamic>;
+                      final originalText = data['text'] ?? '';
+                      final isMe = data['senderId'] == widget.currentUser.id;
 
-                    return Align(
-                      alignment:
-                          isMe ? Alignment.centerRight : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: isMe
-                              ? theme.colorScheme.primary
-                              : theme.cardColor,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          text,
-                          style: TextStyle(
-                            color: isMe
-                                ? Colors.white
-                                : theme.textTheme.bodyMedium?.color,
+                      if (_targetLanguage != null && !_translatedCache.containsKey(doc.id)) {
+                        TranslationService.translateText(originalText, _targetLanguage!).then((res) {
+                          if (mounted) {
+                            setState(() {
+                              _translatedCache[doc.id] = res;
+                            });
+                          }
+                        });
+                      }
+
+                      final displayText = (_targetLanguage != null && _translatedCache.containsKey(doc.id))
+                          ? _translatedCache[doc.id]!
+                          : originalText;
+
+                      return AnimatedMessageBubble(
+                        key: ValueKey(doc.id),
+                        isMe: isMe,
+                        child: GestureDetector(
+                          onLongPress: () => _showTranslationMenu(doc.id, originalText),
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isMe
+                                  ? theme.colorScheme.primary
+                                  : theme.cardColor,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Column(
+                              crossAxisAlignment:
+                                  isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  displayText,
+                                  style: TextStyle(
+                                    color: isMe
+                                        ? Colors.white
+                                        : theme.textTheme.bodyMedium?.color,
+                                  ),
+                                ),
+                                if (_targetLanguage != null && _translatedCache.containsKey(doc.id))
+                                  const Padding(
+                                    padding: EdgeInsets.only(top: 4.0),
+                                    child: Text(
+                                      '• переведено',
+                                      style: TextStyle(fontSize: 9, color: Colors.grey),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  },
-                );
-              },
+                      );
+                    },
+                  );
+                },
+              ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _msgController,
-                    decoration: InputDecoration(
-                      hintText: 'Сообщение...',
-                      filled: true,
-                      fillColor: theme.cardColor,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
+            Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _msgController,
+                      decoration: InputDecoration(
+                        hintText: 'Сообщение...',
+                        filled: true,
+                        fillColor: theme.cardColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(24),
+                          borderSide: BorderSide.none,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                IconButton(
-                  icon: Icon(Icons.send, color: theme.colorScheme.primary),
-                  onPressed: _send,
-                ),
-              ],
+                  _isSending
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12.0),
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : IconButton(
+                          icon: Icon(Icons.send, color: theme.colorScheme.primary),
+                          onPressed: _send,
+                        ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-// ---------------- 5. ПРОФИЛЬ ----------------
+// ---------------- 6. ПРОФИЛЬ ----------------
 class ProfileScreen extends StatelessWidget {
   final UserModel currentUser;
   final VoidCallback onLogout;
@@ -1245,6 +1962,43 @@ class ProfileScreen extends StatelessWidget {
     required this.isDarkMode,
   });
 
+  void _showGeminiThanksDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.auto_awesome, color: Colors.amber),
+            SizedBox(width: 8),
+            Text('Gemini AI'),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Особая благодарность архитектуре Gemini AI',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            SizedBox(height: 10),
+            Text(
+              'Все алгоритмы интеллектуальной модерации текста, фильтрация нецензурной лексики, защита психологического здоровья пользователей и мгновенный автоперевод сообщений между языками выстроены на базе технологий Google Gemini.',
+              style: TextStyle(fontSize: 13, height: 1.4),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Закрыть'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1253,6 +2007,7 @@ class ProfileScreen extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             const SizedBox(height: 20),
             const Text('Профиль',
@@ -1297,6 +2052,35 @@ class ProfileScreen extends StatelessWidget {
                 trailingIcon: isDarkMode ? Icons.dark_mode : Icons.light_mode,
               ),
             ),
+            InkWell(
+              onTap: () => _showGeminiThanksDialog(context),
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.auto_awesome, color: Colors.amber, size: 18),
+                        SizedBox(width: 8),
+                        Text(
+                          'Особая благодарность Gemini',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    Icon(Icons.arrow_forward_ios_rounded, size: 12, color: Colors.amber),
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(height: 24),
             TextButton(
               onPressed: onLogout,
@@ -1332,9 +2116,11 @@ class ProfileScreen extends StatelessWidget {
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(title, style: const TextStyle(fontSize: 13)),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               if (trailingIcon != null) ...[
                 Icon(trailingIcon, size: 16, color: theme.colorScheme.primary),
