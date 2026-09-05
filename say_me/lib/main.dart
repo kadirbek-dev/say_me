@@ -53,7 +53,7 @@ void main() async {
   });
 }
 
-// ---------------- ИИ МОДЕРАТОР И ПЕРЕВОДЧИК ----------------
+// ---------------- ИИ МОДЕРАТОР, ПЕРЕВОДЧИК И ЧАТ-БОТ ----------------
 class ContentModerator {
   static const String _geminiApiKey = 'YOUR_GEMINI_API_KEY';
 
@@ -63,7 +63,7 @@ class ContentModerator {
     }
 
     final url = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_geminiApiKey',
+      'https://generativelanguage.googleapis.com/v1beta/interactions?key=$_geminiApiKey',
     );
 
     final prompt = '''
@@ -84,14 +84,9 @@ class ContentModerator {
         url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'contents': [
-            {
-              'parts': [
-                {'text': prompt}
-              ]
-            }
-          ],
-          'generationConfig': {
+          'model': 'models/gemini-2.5-flash',
+          'input': prompt,
+          'generation_config': {
             'temperature': 0.0,
           }
         }),
@@ -99,12 +94,56 @@ class ContentModerator {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final resultText = data['candidates']?[0]['content']?['parts']?[0]['text']?.toString().trim() ?? '';
+        final resultText = data['outputs']?[0]['text']?.toString().trim() ??
+            data['candidates']?[0]['content']?['parts']?[0]['text']?.toString().trim() ?? '';
         return !resultText.contains('UNSAFE');
       }
       return true;
     } catch (e) {
       return true;
+    }
+  }
+
+  static Future<String> getAIChatResponse(String userMessage) async {
+    if (_geminiApiKey == 'YOUR_GEMINI_API_KEY' || _geminiApiKey.isEmpty) {
+      return "ИИ-ассистент временно недоступен. Укажите API ключ в настройках.";
+    }
+
+    final url = Uri.parse(
+      'https://generativelanguage.googleapis.com/v1beta/interactions?key=$_geminiApiKey',
+    );
+
+    final prompt = '''
+Ты — добрый, эмпатичный и профессиональный ИИ-ассистент в приложении психологической поддержки "Say me".
+Твоя задача — выслушать пользователя, поддержать его и дать дельный, мягкий совет.
+
+Сообщение пользователя: "$userMessage"
+''';
+
+    try {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'model': 'models/gemini-2.5-flash',
+          'input': prompt,
+          'generation_config': {
+            'temperature': 0.7,
+            'max_output_tokens': 65536,
+            'top_p': 0.95,
+          }
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return data['outputs']?[0]['text']?.toString().trim() ??
+            data['candidates']?[0]['content']?['parts']?[0]['text']?.toString().trim() ??
+            "Извините, не удалось сформировать ответ.";
+      }
+      return "Ошибка связи с сервером ИИ.";
+    } catch (e) {
+      return "Ошибка сети при обращении к ИИ.";
     }
   }
 }
@@ -118,14 +157,14 @@ class TranslationService {
     }
 
     final url = Uri.parse(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_geminiApiKey',
+      'https://generativelanguage.googleapis.com/v1beta/interactions?key=$_geminiApiKey',
     );
 
     final prompt = '''
 Ты — профессиональный синхронный переводчик приложения психологической поддержки.
 Переведи следующий текст на язык: "$targetLanguage".
 Сохраняй эмпатичный tone-of-voice и смысловую точность оригинала.
-Выдавай ВЫКЛЮЧИТЕЛЬНО итоговый перевод без пояснений и кавычек.
+Выдавай ИСКЛЮЧИТЕЛЬНО итоговый перевод без пояснений и кавычек.
 
 Текст: "$text"
 ''';
@@ -135,14 +174,9 @@ class TranslationService {
         url,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'contents': [
-            {
-              'parts': [
-                {'text': prompt}
-              ]
-            }
-          ],
-          'generationConfig': {
+          'model': 'models/gemini-2.5-flash',
+          'input': prompt,
+          'generation_config': {
             'temperature': 0.2,
           }
         }),
@@ -150,7 +184,8 @@ class TranslationService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final translated = data['candidates']?[0]['content']?['parts']?[0]['text']?.toString().trim() ?? text;
+        final translated = data['outputs']?[0]['text']?.toString().trim() ??
+            data['candidates']?[0]['content']?['parts']?[0]['text']?.toString().trim() ?? text;
         return translated;
       }
       return text;
@@ -968,6 +1003,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         currentUser: widget.currentUser,
         onOpenChat: (u) => _openDirectChat(context, u),
       ),
+      AIChatBotScreen(currentUser: widget.currentUser),
       ProfileScreen(
         currentUser: widget.currentUser,
         onLogout: widget.onLogout,
@@ -1015,7 +1051,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 ),
               ),
               _buildNavItem(Icons.chat_bubble_outline_rounded, 2),
-              _buildNavItem(Icons.person_outline_rounded, 3),
+              _buildNavItem(Icons.smart_toy_outlined, 3),
+              _buildNavItem(Icons.person_outline_rounded, 4),
             ],
           ),
         ),
@@ -1030,7 +1067,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       onTap: () => setState(() => _currentIndex = index),
       behavior: HitTestBehavior.opaque,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+        padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
         child: Icon(
           icon,
           color: isSelected
@@ -1502,7 +1539,9 @@ class ChatListScreen extends StatelessWidget {
                     final u = otherUsers[i];
                     return ListTile(
                       leading: CircleAvatar(
-                          child: Text(u.username.isNotEmpty ? u.username[0] : 'U')),
+                        backgroundImage: u.avatarUrl.isNotEmpty ? NetworkImage(u.avatarUrl) : null,
+                        child: u.avatarUrl.isEmpty ? Text(u.username.isNotEmpty ? u.username[0] : 'U') : null,
+                      ),
                       title: Text(u.username),
                       subtitle: Text(
                           u.role == UserRole.doctor ? 'Врач' : 'Пациент'),
@@ -1519,7 +1558,124 @@ class ChatListScreen extends StatelessWidget {
   }
 }
 
-// ---------------- 4. ЭЛЕМЕНТ СООБЩЕНИЯ С АНИМАЦИЕЙ ----------------
+// ---------------- 4. ИИ ЧАТ-БОТ ЭКРАН ----------------
+class AIChatBotScreen extends StatefulWidget {
+  final UserModel currentUser;
+
+  const AIChatBotScreen({super.key, required this.currentUser});
+
+  @override
+  State<AIChatBotScreen> createState() => _AIChatBotScreenState();
+}
+
+class _AIChatBotScreenState extends State<AIChatBotScreen> {
+  final List<Map<String, String>> _messages = [
+    {
+      'sender': 'ai',
+      'text': 'Здравствуйте! Я ваш ИИ-помощник. Поделитесь со мной тем, что вас беспокоит, и я постараюсь помочь.'
+    }
+  ];
+  final TextEditingController _msgController = TextEditingController();
+  bool _isLoading = false;
+
+  void _sendMessage() async {
+    final text = _msgController.text.trim();
+    if (text.isEmpty || _isLoading) return;
+
+    setState(() {
+      _messages.add({'sender': 'user', 'text': text});
+      _isLoading = true;
+    });
+    _msgController.clear();
+
+    final aiResponse = await ContentModerator.getAIChatResponse(text);
+
+    if (mounted) {
+      setState(() {
+        _messages.add({'sender': 'ai', 'text': aiResponse});
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return SafeArea(
+      child: Column(
+        children: [
+          const SizedBox(height: 12),
+          const Text('ИИ Помощник',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _messages.length,
+              itemBuilder: (ctx, i) {
+                final isUser = _messages[i]['sender'] == 'user';
+                return Align(
+                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: isUser
+                          ? theme.colorScheme.primary
+                          : theme.cardColor,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      _messages[i]['text']!,
+                      style: TextStyle(
+                        color: isUser
+                            ? Colors.white
+                            : theme.textTheme.bodyMedium?.color,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          if (_isLoading)
+            const Padding(
+              padding: EdgeInsets.all(8.0),
+              child: CircularProgressIndicator(),
+            ),
+          Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _msgController,
+                    decoration: InputDecoration(
+                      hintText: 'Задайте вопрос ИИ...',
+                      filled: true,
+                      fillColor: theme.cardColor,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.send, color: theme.colorScheme.primary),
+                  onPressed: _sendMessage,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------- 5. ЭЛЕМЕНТ СООБЩЕНИЯ С АНИМАЦИЕЙ ----------------
 class AnimatedMessageBubble extends StatefulWidget {
   final Widget child;
   final bool isMe;
@@ -1563,7 +1719,7 @@ class _AnimatedMessageBubbleState extends State<AnimatedMessageBubble> {
   }
 }
 
-// ---------------- 5. ОКНО ЧАТА С ИИ-МОДЕРАЦИЕЙ И ПЕРЕВОДОМ ----------------
+// ---------------- 6. ОКНО ЧАТА С ИИ-МОДЕРАЦИЕЙ И ПЕРЕВОДОМ ----------------
 class DirectChatScreen extends StatefulWidget {
   final UserModel currentUser;
   final UserModel targetUser;
@@ -1947,7 +2103,7 @@ class _DirectChatScreenState extends State<DirectChatScreen> {
   }
 }
 
-// ---------------- 6. ПРОФИЛЬ ----------------
+// ---------------- 7. ПРОФИЛЬ С ВОЗМОЖНОСТЬЮ РЕДАКТИРОВАНИЯ ----------------
 class ProfileScreen extends StatelessWidget {
   final UserModel currentUser;
   final VoidCallback onLogout;
@@ -1961,6 +2117,58 @@ class ProfileScreen extends StatelessWidget {
     required this.onToggleTheme,
     required this.isDarkMode,
   });
+
+  void _editName(BuildContext context) {
+    final controller = TextEditingController(text: currentUser.username);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Изменить имя'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Имя или псевдоним'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          ElevatedButton(
+            onPressed: () async {
+              final newName = controller.text.trim();
+              if (newName.isNotEmpty) {
+                await FirebaseFirestore.instance.collection('users').doc(currentUser.id).update({'username': newName});
+                if (context.mounted) Navigator.pop(ctx);
+              }
+            },
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _editAvatar(BuildContext context) {
+    final controller = TextEditingController(text: currentUser.avatarUrl);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Изменить ссылку на аватар'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'URL картинки'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          ElevatedButton(
+            onPressed: () async {
+              final newAvatar = controller.text.trim();
+              await FirebaseFirestore.instance.collection('users').doc(currentUser.id).update({'avatar_url': newAvatar});
+              if (context.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+  }
 
   void _showGeminiThanksDialog(BuildContext context) {
     showDialog(
@@ -2006,94 +2214,111 @@ class ProfileScreen extends StatelessWidget {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const SizedBox(height: 20),
-            const Text('Профиль',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-            CircleAvatar(
-              radius: 36,
-              backgroundColor: theme.colorScheme.primary,
-              child: Text(
-                currentUser.username.isNotEmpty ? currentUser.username[0] : 'U',
-                style: const TextStyle(fontSize: 24, color: Colors.white),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              currentUser.username,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              currentUser.email,
-              style: TextStyle(
-                color: theme.textTheme.bodyMedium?.color?.withOpacity(0.5),
-              ),
-            ),
-            const SizedBox(height: 24),
-            _buildSettingRow(context, 'Роль аккаунта',
-                currentUser.role == UserRole.doctor ? 'Врач' : 'Пациент'),
-            _buildSettingRow(context, 'Возраст', '${currentUser.age} лет'),
-            _buildSettingRow(
-                context,
-                'Верификация',
-                currentUser.isIdentityVerified
-                    ? 'Подтверждён'
-                    : 'Не подтверждён'),
-            InkWell(
-              onTap: onToggleTheme,
-              borderRadius: BorderRadius.circular(12),
-              child: _buildSettingRow(
-                context,
-                'Тема',
-                isDarkMode ? 'Тёмная' : 'Светлая',
-                trailingIcon: isDarkMode ? Icons.dark_mode : Icons.light_mode,
-              ),
-            ),
-            InkWell(
-              onTap: () => _showGeminiThanksDialog(context),
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.amber.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.amber.withOpacity(0.3)),
-                ),
-                child: const Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.auto_awesome, color: Colors.amber, size: 18),
-                        SizedBox(width: 8),
-                        Text(
-                          'Особая благодарность Gemini',
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
-                    Icon(Icons.arrow_forward_ios_rounded, size: 12, color: Colors.amber),
-                  ],
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const SizedBox(height: 20),
+              const Text('Профиль',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              GestureDetector(
+                onTap: () => _editAvatar(context),
+                child: CircleAvatar(
+                  radius: 36,
+                  backgroundColor: theme.colorScheme.primary,
+                  backgroundImage: currentUser.avatarUrl.isNotEmpty ? NetworkImage(currentUser.avatarUrl) : null,
+                  child: currentUser.avatarUrl.isEmpty
+                      ? Text(
+                          currentUser.username.isNotEmpty ? currentUser.username[0] : 'U',
+                          style: const TextStyle(fontSize: 24, color: Colors.white),
+                        )
+                      : null,
                 ),
               ),
-            ),
-            const SizedBox(height: 24),
-            TextButton(
-              onPressed: onLogout,
-              child: const Text(
-                'Выйти из аккаунта',
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    currentUser.username,
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined, size: 18),
+                    onPressed: () => _editName(context),
+                  ),
+                ],
+              ),
+              Text(
+                currentUser.email,
                 style: TextStyle(
-                  color: Colors.redAccent,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
+                  color: theme.textTheme.bodyMedium?.color?.withOpacity(0.5),
                 ),
               ),
-            ),
-          ],
+              const SizedBox(height: 24),
+              _buildSettingRow(context, 'Роль аккаунта',
+                  currentUser.role == UserRole.doctor ? 'Врач' : 'Пациент'),
+              _buildSettingRow(context, 'Возраст', '${currentUser.age} лет'),
+              _buildSettingRow(
+                  context,
+                  'Верификация',
+                  currentUser.isIdentityVerified
+                      ? 'Подтверждён'
+                      : 'Не подтверждён'),
+              InkWell(
+                onTap: onToggleTheme,
+                borderRadius: BorderRadius.circular(12),
+                child: _buildSettingRow(
+                  context,
+                  'Тема',
+                  isDarkMode ? 'Тёмная' : 'Светлая',
+                  trailingIcon: isDarkMode ? Icons.dark_mode : Icons.light_mode,
+                ),
+              ),
+              InkWell(
+                onTap: () => _showGeminiThanksDialog(context),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.auto_awesome, color: Colors.amber, size: 18),
+                          SizedBox(width: 8),
+                          Text(
+                            'Особая благодарность Gemini',
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                      Icon(Icons.arrow_forward_ios_rounded, size: 12, color: Colors.amber),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              TextButton(
+                onPressed: onLogout,
+                child: const Text(
+                  'Выйти из аккаунта',
+                  style: TextStyle(
+                    color: Colors.redAccent,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
