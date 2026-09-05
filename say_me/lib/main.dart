@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:image_picker/image_picker.dart';
 
 void main() async {
   runZonedGuarded(() async {
@@ -53,7 +54,7 @@ void main() async {
   });
 }
 
-// ---------------- ИИ МОДЕРАТОР, ПЕРЕВОДЧИК И ЧАТ-БОТ ----------------
+// ---------------- ИИ МОДЕРАТОР И ЧАТ-БОТ ----------------
 class ContentModerator {
   static const String _geminiApiKey = 'YOUR_GEMINI_API_KEY';
 
@@ -996,20 +997,21 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     final theme = Theme.of(context);
     final bottomInset = MediaQuery.of(context).padding.bottom;
 
+    // ВЫРАВНИВАНИЕ ЭКРАНОВ СОГЛАСНО НАВИГАЦИОННОЙ ПАНЕЛИ
     final List<Widget> screens = [
-      HomeScreen(currentUser: widget.currentUser),
-      SearchScreen(onOpenChat: (u) => _openDirectChat(context, u)),
+      HomeScreen(currentUser: widget.currentUser), // 0: Главная
+      SearchScreen(onOpenChat: (u) => _openDirectChat(context, u)), // 1: Поиск
       ChatListScreen(
         currentUser: widget.currentUser,
         onOpenChat: (u) => _openDirectChat(context, u),
-      ),
-      AIChatBotScreen(currentUser: widget.currentUser),
+      ), // 2: Диалоги
+      AIChatBotScreen(currentUser: widget.currentUser), // 3: ИИ Чат-бот
       ProfileScreen(
         currentUser: widget.currentUser,
         onLogout: widget.onLogout,
         onToggleTheme: widget.onToggleTheme,
         isDarkMode: widget.isDarkMode,
-      ),
+      ), // 4: Профиль
     ];
 
     return Scaffold(
@@ -1051,7 +1053,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 ),
               ),
               _buildNavItem(Icons.chat_bubble_outline_rounded, 2),
-              _buildNavItem(Icons.smart_toy_outlined, 3),
+              _buildNavItem(Icons.smart_toy_outlined, 3), // 3-я вкладка с ИИ Помощником
               _buildNavItem(Icons.person_outline_rounded, 4),
             ],
           ),
@@ -1098,6 +1100,14 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     bool isAnon = true;
     bool isPublishing = false;
 
+    Future<void> pickImage() async {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+      if (image != null) {
+        imageUrlController.text = image.path;
+      }
+    }
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1136,18 +1146,30 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-              TextField(
-                controller: imageUrlController,
-                decoration: InputDecoration(
-                  hintText: 'Ссылка на изображение (опционально)...',
-                  prefixIcon: const Icon(Icons.image_outlined),
-                  filled: true,
-                  fillColor: theme.scaffoldBackgroundColor,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide.none,
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: imageUrlController,
+                      decoration: InputDecoration(
+                        hintText: 'Путь к фото или URL...',
+                        prefixIcon: const Icon(Icons.image_outlined),
+                        filled: true,
+                        fillColor: theme.scaffoldBackgroundColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.photo_library_outlined),
+                    tooltip: 'Выбрать из галереи',
+                    onPressed: pickImage,
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
               Row(
@@ -1272,7 +1294,6 @@ class HomeScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            // Баннер вызова службы 115
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
