@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'chat_screen.dart'; // Путь к твоему экрану чата
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -8,18 +10,64 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  String selectedCategory = 'Все';
+  int _currentIndex = 0;
 
-  final List<String> categories = [
-    'Все',
-    'Тревога и стресс',
-    'Отношения',
-    'Одиночество',
-    'Выговориться',
-  ];
+  // Данные профиля (состояние)
+  String _userName = 'Алексей';
+  XFile? _avatarImage;
 
   @override
   Widget build(BuildContext context) {
+    // Список экранов для переключения
+    final List<Widget> screens = [
+      _buildFeedTab(),
+      const ChatScreen(), // Твой ИИ Чат
+      _buildProfileTab(), // Новый экран профиля
+    ];
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFFAF8F5),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: screens,
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        selectedItemColor: const Color(0xFF81C784),
+        unselectedItemColor: Colors.grey,
+        onTap: (index) => setState(() => _currentIndex = index),
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home_outlined),
+            activeIcon: Icon(Icons.home),
+            label: 'Лента',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.smart_toy_outlined),
+            activeIcon: Icon(Icons.smart_toy),
+            label: 'ИИ Чат',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline),
+            activeIcon: Icon(Icons.person),
+            label: 'Профиль',
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Вкладка 1: Главная лента ---
+  Widget _buildFeedTab() {
+    String selectedCategory = 'Все';
+    final List<String> categories = [
+      'Все',
+      'Тревога и стресс',
+      'Отношения',
+      'Одиночество',
+      'Выговориться',
+    ];
+
     return Scaffold(
       backgroundColor: const Color(0xFFFAF8F5),
       appBar: AppBar(
@@ -31,10 +79,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.chat_bubble_outline, color: Colors.black87),
-            onPressed: () => Navigator.pushNamed(context, '/chat'),
-          ),
-          IconButton(
             icon: const Icon(Icons.logout, color: Colors.black87),
             onPressed: () => Navigator.pushReplacementNamed(context, '/auth'),
           ),
@@ -42,7 +86,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Категории
           SizedBox(
             height: 50,
             child: ListView.builder(
@@ -58,13 +101,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     selected: isSelected,
                     label: Text(cat),
                     selectedColor: const Color(0xFFE8E0F9),
-                    onSelected: (_) => setState(() => selectedCategory = cat),
+                    onSelected: (_) {},
                   ),
                 );
               },
             ),
           ),
-          // Карточки обращений
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(16),
@@ -78,7 +120,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   comments: 4,
                 ),
                 _buildPostCard(
-                  author: 'Алексей',
+                  author: _userName,
                   tag: 'Отношения',
                   title: 'Не могу найти общий язык с близкими',
                   desc: 'Кажется, будто меня никто не слышит. Как научиться спокойно объяснять позицию?',
@@ -91,10 +133,92 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.pushNamed(context, '/chat'),
+        onPressed: () => setState(() => _currentIndex = 1), // Переход в ИИ Чат
         backgroundColor: const Color(0xFF81C784),
-        icon: const Icon(Icons.edit, color: Colors.white),
-        label: const Text('Выговориться', style: TextStyle(color: Colors.white)),
+        icon: const Icon(Icons.smart_toy, color: Colors.white),
+        label: const Text('Чат с ИИ', style: TextStyle(color: Colors.white)),
+      ),
+    );
+  }
+
+  // --- Вкладка 3: Профиль (Никнейм + Аватарка) ---
+  Widget _buildProfileTab() {
+    final nameController = TextEditingController(text: _userName);
+
+    Future<void> pickAvatar() async {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+      if (image != null) {
+        setState(() => _avatarImage = image);
+      }
+    }
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFFAF8F5),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: const Text('Профиль', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          children: [
+            Center(
+              child: Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 55,
+                    backgroundColor: const Color(0xFFE0E0E0),
+                    backgroundImage: _avatarImage != null ? NetworkImage(_avatarImage!.path) : null,
+                    child: _avatarImage == null
+                        ? const Icon(Icons.person, size: 60, color: Colors.white)
+                        : null,
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: InkWell(
+                      onTap: pickAvatar,
+                      child: const CircleAvatar(
+                        radius: 18,
+                        backgroundColor: Color(0xFF81C784),
+                        child: Icon(Icons.camera_alt, size: 18, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            TextField(
+              controller: nameController,
+              decoration: InputDecoration(
+                labelText: 'Никнейм',
+                prefixIcon: const Icon(Icons.edit_note),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF81C784),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () {
+                  setState(() => _userName = nameController.text);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Профиль успешно обновлён!')),
+                  );
+                },
+                child: const Text('Сохранить изменения', style: TextStyle(color: Colors.white, fontSize: 16)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -117,9 +241,12 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Row(
               children: [
-                const CircleAvatar(
-                  backgroundColor: Color(0xFFE0E0E0),
-                  child: Icon(Icons.person, color: Colors.white),
+                CircleAvatar(
+                  backgroundColor: const Color(0xFFE0E0E0),
+                  backgroundImage: _avatarImage != null && author == _userName ? NetworkImage(_avatarImage!.path) : null,
+                  child: _avatarImage == null || author != _userName
+                      ? const Icon(Icons.person, color: Colors.white)
+                      : null,
                 ),
                 const SizedBox(width: 12),
                 Column(
@@ -145,7 +272,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const Spacer(),
                 TextButton.icon(
-                  onPressed: () => Navigator.pushNamed(context, '/chat'),
+                  onPressed: () => setState(() => _currentIndex = 1),
                   icon: const Icon(Icons.chat_bubble_outline, size: 18),
                   label: Text('Ответы ($comments)'),
                 ),
